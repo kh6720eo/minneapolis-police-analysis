@@ -1,0 +1,157 @@
+---
+title: "Miniproject 3"
+format:
+  html:
+    embed-resources: true
+editor: source
+---
+
+Link to google doc for instructions: [LINK](https://docs.google.com/document/d/1MFRIkBw1g_VOyTAUXGinhGl7yxlmZNaeawMBDwd4mJM/edit?usp=sharing)
+
+For this activity you will be working with two sets of "open data":
+
+-   A dataset of recorded police stops from [openDataMinneapolis](https://opendata.minneapolismn.gov/datasets/police-stop-data/explore).
+-   A dataset from the of demographic data for different neighborhoods in Minneapolis from [mnCompass](https://www.mncompass.org/profiles/neighborhoods/minneapolis-saint-paul). This is collected from the American Community Survey data from 2017-2021; for the purpose of the activity let's assume it is representative.
+
+Both of these datasets are quite large, but the names of the data columns should be representative of what is represented. You can also link to the police stop data for some more descriptions.
+
+**Your task:** First formulate a question that you would like to ask can be answered when you join these two datasets together. Then design a data graphic you think would best answer this question. I anticipate that you will need to use our R data wrangling verbs, joins, pivoting, and other tools to best produce the graphic. One way to link them is on the neighborhood variable in both (but beware that the names are spelled differently).
+
+My suggestion is that you first narrow the two datasets, and then join (rather than joining right away).
+
+**A note:** I recognize that these datasets embody some of the deep and enduring legacies of racial injustice for Black people. Minneapolis has been at the heart of movements in response to bias, policing, and white supremacy.
+
+The goal of this miniproject (I hope) is for you to recognize that you are not powerless, and open data like these can be used for social justice. However, when working with data such as these, be aware of any biases and priveleges (hidden, implicit, or overt) in the formulation, design, analysis, and conclusions drawn from your data graphic.
+
+
+
+
+### Grade (100 points):
+
+Your grade for this project will include my evaluation of your data graphic, utilizing the design principles provided:
+
+
+-   10 points:  Handed in by the deadline. You may only submit an assignment late, prior to the Final Submission Deadline if you have an Excused absence for this class session.
+-   20 points: [Code of ethics](https://docs.google.com/forms/d/e/1FAIpQLSe4tk3Q5r168rn7XrPjgbQ3GbzbSa-bDvhtcs4FB4VK61EADQ/viewform?usp=sf_link) completed in the Quarto file.
+-   10 points: Your submitted Quarto file compiles cleanly without errors (meaning that all the data and graphics load accordingly).
+-   10 points: All data graphics need appropriate, explanatory, and identifiable labels on any axes or aesthetics and a title.
+-   30 points: the data graphic has at least *2 layers*, answers/provides insight to the question you ultimately decide to pursue (be sure to explain your question and how your data graphic provides insight and meaningful comparisons).
+-   20 points: Your code includes the data verbs and wrangling from Chapters 4-6, **including joins, mutating and wrangling. Your data graphic should try to meaningfully incorporate information from both datasets.** 
+-   (Extra 5 points): Pizaaz. Do I find your data graphic intriguing?
+
+<div style="background-color: #f0f8ff; border-left: 5px solid #007acc; padding: 10px;">
+## (20 points) Code of Ethics
+For each statement below, if it is true, replace the empty box ("[ ]", rendered as &#x2610;) with a check mark ("[X]", rendered as &#x2611;) in the Quarto file before rendering.
+
+The link to the complete Code of Ethics is here: [LINK](https://docs.google.com/document/d/1lMvzPTGUAaMnH0KPibShQ1ualuo8uqICCexkh8zmsW8/edit?usp=sharing)
+
+- [ X] I typed every character that is in the code file(s) that I submitted (except for what was originally provided in the problem, the professor, other sources allowed by the professor, or circumstances described below).
+- [ ] I did show my code to another student in the class so that they could help me debug my code.
+- [ ] I showed my code to another student so I could help them debug their code.
+- [ ] I used resources that provided worked out solutions to the exact problem or a related problem (e.g. a classmate, stackexchange, Chegg, or other resources not stated here). The link to these is provided here: [LINK](COPY_LINK_HERE)
+- [ ] If necessary, I can verbally explain the purpose of each line, function, or statement in the code.
+- [ ] I did not send my code to another student through email, text, or any other digital communication for the purposes of submitting my unedited code as their own (direct copying purposes).
+- [ ] I used generative AI in this assignment. I will provide the specific input and output from the AI. The link to each the prompts I used in this assignment is here: [LINK](COPY_LINK_HERE)
+</div>
+
+
+## Pulling in the data
+
+
+Let's pull in the data set:
+
+```{r, echo=TRUE,message=FALSE,warning=FALSE}
+
+library(tidyverse)
+library(janitor)
+library(ggplot2)
+
+# Load the police stops data directly from the API:
+geojson_url <- "https://services.arcgis.com/afSMGVsC7QlRK1kZ/arcgis/rest/services/Police_Stop_Data/FeatureServer/0/query?outFields=*&where=1%3D1&f=geojson"
+
+# Read the GeoJSON file. Do some data wrangling to get the dates set correctly (I had to do this by trial and error )
+police_data <- sf::st_read(geojson_url) |>
+  sf::st_drop_geometry() |>
+  mutate(across(.cols = c("responseDate","lastUpdateDate"),
+                .fns = ~(as.POSIXct(.x/1000, origin = "1970-01-01") |>
+                           force_tz(tzone="UTC") |> with_tz("America/Chicago")) ))
+
+
+# Location of the excel file:
+url <- "https://www.mncompass.org/sites/default/files/Minneapolis-St.Paul_Neighborhoods_2017-2021.xlsx"
+
+# Name of the file to save:
+destfile <- "Minneapolis_St_Paul_Neighborhoods_2017_2021.xlsx"
+
+# Download
+curl::curl_download(url, destfile)
+neighborhood_data <- readxl::read_excel(destfile)
+#counts stop per neighborhood 
+police_stops_summary <- police_data |>
+  filter(!is.na(neighborhood)) |>
+  group_by(neighborhood) |>
+  summarise(police_stops = n())
+# prepare neighborhood population data 
+neighborhood_data_clean <- neighborhood_data |>
+  select(Neighborhood, `Total population`) |>
+  rename(neighborhood = Neighborhood,
+         total_population = `Total population`) |>
+  mutate(neighborhood = str_to_title(neighborhood))
+   #join them together
+combined_data <- left_join(police_stops_summary, neighborhood_data_clean, by = "neighborhood") |>
+  drop_na()
+# simple plot 
+ggplot(combined_data, aes(x = total_population, y = police_stops)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(
+    title = "Do Neighborhoods with More People Have More Police Stops?",
+    x = "Total Population",
+    y = "Number of Police Stops"
+  ) +
+  theme_minimal()
+
+
+
+```
+
+Now let's see the names of the columns (to save space I am not printing them at the moment, but you can see them if you change the code chunk to `eval=TRUE`).
+
+**NOTE:** in your final submission for readability do not print out the names of each dataset.
+
+```{r eval=FALSE}
+names(police_data)
+
+
+
+names(neighborhood_data)
+
+```
+
+### Task 1: Describe the question you investigating from the data:
+  neighborhood with more people generally have more police stops . the data shows a positive relationship between population  size and the number of stops, which is expected . however,some neighborhood have more stops than other even when adjusting for population.suggesting that other factors like race or socioeconomic status—may also influence
+    
+ 
+
+### Task 2: Identify variables (columns) you will need to utilize from both datasets:
+from police_data
+- race
+-call Disposition booking
+-neighborhood
+from neighborhood _data
+-neighborhood
+-total population
+
+
+### Task 2+: Do your data wrangling thing!
+- You may need to do some wrangling of the data, which could include converting columns from a string.
+- The data frame `neighborhood_data` includes data from both Minneapolis and St. Paul, so you will need to account for that (hint: think joins)
+
+```{r}
+
+ 
+  
+
+
+```
+
